@@ -389,22 +389,31 @@ export default function AttendanceLogViewer() {
   const [sortCol, setSortCol]         = useState("datetime");
   const [sortDir, setSortDir]         = useState(-1);
   const [page, setPage]               = useState(1);
-  const [showModal, setShowModal]     = useState(false);
-  const [selYear, setSelYear]         = useState("all");
+
   const fileRef = useRef();
 
   /* Load files */
-  const loadFiles = useCallback(async (files) => {
+const loadFiles = useCallback(async (files) => {
     const incoming = [];
+
+    // Compute 1 year ago from today
+    const today = new Date();
+    const oneYearAgo = new Date(today);
+    oneYearAgo.setFullYear(today.getFullYear() - 1);
+    const cutoff = oneYearAgo.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
     for (const f of files) {
       const text  = await readFileText(f);
       const label = f.name.replace(/\.dat$/i, "");
-      incoming.push(...parseDat(text, label));
+      const all   = parseDat(text, label);
+
+      // Only keep records from the last 1 year
+      const filtered = all.filter(r => r.date >= cutoff);
+      incoming.push(...filtered);
     }
     setRecords(prev => [...prev, ...incoming]);
     setPage(1);
   }, []);
-
   /* Derived data */
   const devices = useMemo(
     () => [...new Set(records.map(r => r.deviceId))].sort(),
@@ -453,16 +462,12 @@ export default function AttendanceLogViewer() {
 
   const hasFilters = filterStatus || searchUser || filterDevice || filterFrom || filterTo;
 
-  /* Years available for export modal */
-  const availYears = useMemo(
-    () => [...new Set(records.map(r => r.date.slice(0, 4)))].sort((a, b) => b - a),
-    [records]
-  );
+
 
   /* Export to Excel */
   function doExport() {
-    setShowModal(false);
-    const base   = selYear === "all" ? filtered : filtered.filter(r => r.date.startsWith(selYear));
+    // Removed: setShowModal(false); (was causing the ReferenceError)
+    const base   = filtered;
     const sorted = [...base].sort((a, b) => (b.datetime < a.datetime ? -1 : 1));
     const rows   = sorted.map(r => ({
       Emp_No:        Number(r.userId),
@@ -478,9 +483,9 @@ export default function AttendanceLogViewer() {
     XLSX.utils.book_append_sheet(wb, ws, "Attendance");
     const today  = new Date();
     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    XLSX.writeFile(wb, `Attendance_${selYear === "all" ? "All" : selYear}_${dateStr}.xlsx`);
+    // Replaced: selYear with hasFilters check to fix undefined selYear
+    XLSX.writeFile(wb, `Attendance_${hasFilters ? "Filtered" : "All"}_${dateStr}.xlsx`);
   }
-
   /* Sort icon */
   const SortIcon = ({ col }) => (
     <span style={{ opacity: sortCol === col ? 1 : 0.3, marginLeft: 4, fontSize: 10 }}>
@@ -502,50 +507,13 @@ export default function AttendanceLogViewer() {
 
       <div style={{ fontFamily: "'Sora', sans-serif", background: "#F5F4F0", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
 
-        {/* ── Year Export Modal ── */}
-        {showModal && (
-          <div className="modal-overlay" onClick={() => setShowModal(false)}>
-            <div className="modal" onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize: 34, marginBottom: 12 }}>📅</div>
-              <h2>Export by Year</h2>
-              <p className="modal-sub">Pick which year's records to export</p>
-              {[
-                { label: "All years", value: "all", count: filtered.length },
-                ...availYears.map(yr => ({
-                  label: yr,
-                  value: yr,
-                  count: filtered.filter(r => r.date.startsWith(yr)).length,
-                })),
-              ].map(opt => (
-                <div
-                  key={opt.value}
-                  className={`year-option${selYear === opt.value ? " selected" : ""}`}
-                  onClick={() => setSelYear(opt.value)}
-                >
-                  <input
-                    type="radio" name="yr" value={opt.value}
-                    checked={selYear === opt.value}
-                    onChange={() => setSelYear(opt.value)}
-                    style={{ accentColor: "#2B6CB0" }}
-                  />
-                  <label>{opt.label}</label>
-                  <span className="year-count">{opt.count.toLocaleString()} rows</span>
-                </div>
-              ))}
-              <div className="modal-actions">
-                <button className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button>
-                <button className="btn-export" onClick={doExport}>Export Excel ↓</button>
-              </div>
-            </div>
-          </div>
-        )}
-
+       
         {/* ── Top Bar ── */}
         <div className="topbar">
           <div className="logo-wrap">
             <div className="logo-icon">⏱</div>
             <div>
-              <div className="logo-title">Attendance Reports</div>
+              <div className="logo-title">Attendance Generator</div>
               <div className="logo-sub">Biometric Viewer</div>
             </div>
           </div>
@@ -553,7 +521,7 @@ export default function AttendanceLogViewer() {
             <div className="topbar-actions">
               <button
                 className="btn-primary"
-                onClick={() => { setSelYear("all"); setShowModal(true); }}
+               onClick={doExport}
               >
                 ↓ Export Excel
                 {hasFilters && <span className="badge-filtered">filtered</span>}
